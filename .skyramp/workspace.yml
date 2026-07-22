@@ -8,7 +8,7 @@ workspace:
   repoUrl: https://github.com/nkravec/openobserve
 metadata:
   schemaVersion: v1
-  mcpVersion: 0.3.1           # pin UI Maintenance build (matches workflow skyrampMcpVersion)
+  mcpVersion: '0.3.2-rc.pom-1' # pin UI Maintenance build (matches workflow skyrampMcpVersion)
   executorVersion: v1.3.34    # v0.11.0 action default
   createdAt: "2026-01-01T00:00:00Z"
   updatedAt: "2026-01-01T00:00:00Z"
