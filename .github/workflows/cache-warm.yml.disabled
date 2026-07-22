@@ -1,0 +1,57 @@
+name: Cache Warm
+
+# Dispatch-only. Builds OpenObserve from source on the DEFAULT branch (main) so the
+# Swatinem/rust-cache under shared-key `testbot-replay-release-ci` is populated in a scope
+# every PR/replay can restore (caches on the default branch are visible to all branches).
+# Toolchain + profile match the replay workflow so the compiled artifacts are reusable.
+#
+# NOTE: GitHub Actions caches are scoped PER REPOSITORY — this must run on THIS fork's main
+# to seed a cache the fork's testbot PRs can restore; a cache warmed on another fork (e.g.
+# sxarsky/openobserve) is not reachable here. Run this once before opening testbot PRs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/branch to build (checkout). Default main."
+        default: "main"
+      toolchain:
+        description: "Rust toolchain to seed (must match the target base's rust-toolchain.toml)."
+        default: "nightly-2026-05-20"
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: testbot-replay-release-ci
+      - name: Install protoc
+        run: bash ./.github/protoc.sh
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Build frontend (embedded into binary via rust-embed)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
+        run: cd web && npm ci && npm run build
+      - name: Build SUT binary (release-ci) — seeds the cache
+        env:
+          CARGO_BUILD_JOBS: "2"   # cap parallel rustc to fit a cold build in 16GB (avoid OOM/exit-143)
+        run: cargo build --profile release-ci --target x86_64-unknown-linux-gnu

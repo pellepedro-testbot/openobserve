@@ -1,0 +1,109 @@
+name: Skyramp Testbot
+
+# Installer-generated v0.11.0 App-token config + HOST-NATIVE OpenObserve SUT bring-up
+# (ported from sxarsky/openobserve PR #1). The installer skeleton has no SUT setup; the
+# build steps + targetSetupCommand below compile OpenObserve from source (rust-cache +
+# release-ci) and run it NATIVELY on the runner host at :5080 — no Docker/DinD. With the
+# SUT on the host and the executor on host networking (workspace.yml dockerNetwork: host),
+# the executor reaches localhost:5080 directly (no container-network mismatch).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'skyramp-testbot[bot]' }}
+
+# OpenObserve runtime config — mirrors upstream .github/workflows/playwright.yml.
+# The native binary (started by deployment-testbot/setup.sh) reads these at startup.
+env:
+  ZO_ROOT_USER_EMAIL: root@example.com
+  ZO_ROOT_USER_PASSWORD: Complexpass#123
+  ZO_BASE_URL: http://localhost:5080
+  ZO_WEB_URL: "http://localhost:5080"
+  ZO_ALLOW_USER_DEFINED_SCHEMAS: true
+  ZO_CREATE_ORG_THROUGH_INGESTION: true
+  ZO_SSRF_ALLOW_LOOPBACK: true
+
+jobs:
+  testbot:
+    # Run on human PR events, or @skyramp-testbot comments on a PR. The
+    # `github.actor != skyramp-testbot[bot]` guard on the pull_request path skips
+    # bot-triggered events (bot-opened side-PRs, and synchronize from the bot's own
+    # test commits) BEFORE the expensive Rust build — avoids ~35-min self-retriggers.
+    if: >-
+      (github.event_name == 'pull_request' && github.actor != 'skyramp-testbot[bot]') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@skyramp-testbot') && github.event.comment.user.login != 'skyramp-testbot[bot]')
+    # NOTE: cold Rust build is heavy; warm rust-cache makes PR builds incremental, but the
+    # first cold build may OOM/timeout a 4-core ubuntu-latest. Seed via Cache Warm on main
+    # first (per-repo cache scope); escalate to a larger runner if a cold build is unavoidable.
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+
+    steps:
+      - name: Generate GitHub App Token
+        id: skyramp-testbot-app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.SKYRAMP_TESTBOT_APP_ID }}
+          private-key: ${{ secrets.SKYRAMP_TESTBOT_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.skyramp-testbot-app-token.outputs.token }}
+          persist-credentials: false
+
+      # ---- Host-native SUT build (mirrors upstream playwright.yml) ----
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" || true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-20
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: testbot-replay-release-ci
+
+      - name: Install protoc
+        run: bash ./.github/protoc.sh
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Build frontend (embedded into binary via rust-embed)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
+        run: cd web && npm ci && npm run build
+
+      - name: Build SUT binary (release-ci)
+        env:
+          GIT_HASH_OVERRIDE: ${{ github.sha }}
+        run: cargo build --profile release-ci --target x86_64-unknown-linux-gnu
+
+      # ---- Run TestBot against the host-native SUT ----
+      - uses: skyramp/testbot@70034f7ff936e4e516064307679160cdc8da60eb # v0.11.0
+        with:
+          skyrampLicenseFile: ${{ secrets.SKYRAMP_LICENSE_FILE }}
+          anthropicApiKey: ${{ secrets.SKYRAMP_TESTBOT_API_KEY }}
+          githubToken: ${{ steps.skyramp-testbot-app-token.outputs.token }}
+          githubAppId: ${{ secrets.SKYRAMP_TESTBOT_APP_ID }}
+          githubAppPrivateKey: ${{ secrets.SKYRAMP_TESTBOT_APP_PRIVATE_KEY }}
+          # Pin the UI Maintenance build explicitly (don't drift with npm `latest`).
+          skyrampMcpVersion: '0.3.1'
+          targetSetupCommand: './deployment-testbot/setup.sh'
+          targetReadyCheckCommand: 'curl -sf http://localhost:5080/web/login'
+          authTokenCommand: './deployment-testbot/get-token.sh'
+          uiCredentials: 'root@example.com:Complexpass#123'

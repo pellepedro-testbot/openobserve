@@ -1,0 +1,1091 @@
+﻿<!-- Copyright 2026 OpenObserve Inc.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+-->
+
+<template>
+  <ODrawer data-test="alert-history-drawer"
+    :open="open"
+    :width="65"
+    :title="t('alert_list.alert_history')"
+    @update:open="emit('update:open', $event)"
+  >
+    <!-- #header override required: header contains alert name/type badges,
+         tab toggle, and datetime picker — too complex for title + sub-slots -->
+    <template #header-left>
+          <div
+            class="tw:flex tw:items-center tw:gap-2 tw:flex-1 tw:min-w-0"
+            data-test="alert-details-title"
+          >
+            <!-- Alert Name Badge — truncates so a long name can never push the
+                 tab toggle into the datetime picker; full name stays in tooltip -->
+            <span
+              v-if="alertDetails"
+              :class="[
+                'tw:font-semibold tw:text-[18px] tw:mr-2 tw:px-2 tw:py-1 tw:rounded-md tw:ml-2 tw:min-w-0 tw:truncate',
+                store.state.theme === 'dark'
+                  ? 'tw:text-blue-400 tw:bg-blue-900/50'
+                  : 'tw:text-blue-600 tw:bg-blue-50',
+              ]"
+              data-test="alert-history-name-badge"
+            >
+              {{ alertDetails.name }}
+              <OTooltip
+                v-if="alertDetails.name"
+                :content="alertDetails.name"
+              />
+            </span>
+            <!-- Alert Type Badge -->
+            <div
+              v-if="alertDetails"
+              :class="[
+                'tw:flex tw:items-center tw:gap-1 tw:px-2 tw:py-1 tw:rounded-md tw:border tw:shrink-0',
+                store.state.theme === 'dark'
+                  ? 'tw:bg-gray-800/50 tw:border-gray-600'
+                  : 'tw:bg-gray-50 tw:border-gray-200',
+              ]"
+            >
+              <OIcon
+                :name="
+                  isAnomaly
+                    ? 'query-stats'
+                    : alertDetails.is-real-time
+                      ? 'bolt'
+                      : 'schedule'
+                "
+                size="sm"
+                class="tw:opacity-70"
+              />
+              <span
+                :class="[
+                  'tw:text-xs tw:font-semibold',
+                  store.state.theme === 'dark'
+                    ? 'tw:text-gray-200'
+                    : 'tw:text-gray-800',
+                ]"
+              >
+                {{
+                  isAnomaly
+                    ? "Anomaly Detection"
+                    : alertDetails.is_real_time
+                      ? "Real-time"
+                      : "Scheduled"
+                }}
+              </span>
+            </div>
+            <!-- Tab toggle -->
+            <OToggleGroup
+              class="tw:shrink-0"
+              :model-value="activeTab"
+              @update:model-value="activeTab = $event as string"
+            >
+              <OToggleGroupItem
+                value="history"
+                size="sm"
+                data-test="alert-history-tab-history"
+              >
+                <template #icon-left>
+                  <OIcon name="history" size="sm" />
+                </template>
+                History
+              </OToggleGroupItem>
+              <OToggleGroupItem
+                value="condition"
+                size="sm"
+                data-test="alert-history-tab-condition"
+              >
+                <template #icon-left>
+                  <OIcon name="code" size="sm" />
+                </template>
+                Condition
+              </OToggleGroupItem>
+            </OToggleGroup>
+          </div>
+    </template>
+    <template #header-right>
+      <div class="col-auto tw:flex tw:items-center tw:gap-1">
+        <DateTime
+          :style="activeTab !== 'history' ? 'visibility: hidden' : ''"
+          ref="dateTimeRef"
+          auto-apply
+          :default-type="dateTimeType"
+          :default-absolute-time="{
+            startTime: absoluteTime.startTime,
+            endTime: absoluteTime.endTime,
+          }"
+          :default-relative-time="relativeTime"
+          data-test="alert-history-drawer-date-picker"
+          @on:date-change="updateDateTime"
+        />
+      </div>
+    </template>
+
+    <!-- Content -->
+    <div class="tw:flex tw:flex-col tw:h-[calc(100vh-4rem)]" v-if="alertDetails">
+      <!-- Tab Panels -->
+      <OTabPanels
+        v-model="activeTab"
+        animated
+        class="tw:flex-1 tw:overflow-hidden tw:bg-transparent"
+        style="display: flex; flex-direction: column"
+      >
+        <!-- History Panel -->
+        <OTabPanel
+          name="history"
+          layout="flex-col"
+          stretch
+        >
+          <div
+            class="tw:flex tw:h-full tw:flex-col tw:flex-1 tw:overflow-hidden tw:px-2 tw:py-2"
+          >
+            <!-- Empty state -->
+            <div
+              v-if="!isLoadingHistory && alertHistory.length === 0"
+              class="tw:flex tw:flex-col tw:items-center tw:justify-center tw:flex-1 tw:gap-2"
+            >
+              <div
+                class="tw:w-14 tw:h-14 tw:rounded-full tw:flex tw:items-center tw:justify-center tw:mb-1"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'tw:bg-gray-800'
+                    : 'tw:bg-gray-100'
+                "
+              >
+                <OIcon
+                  name="history-toggle-off"
+                  size="lg"
+                  :class="store.state.theme === 'dark' ? 'tw:text-gray-500' : 'tw:text-gray-400'"
+                />
+              </div>
+              <div
+                class="tw:text-sm tw:font-medium"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'tw:text-gray-400'
+                    : 'tw:text-gray-600'
+                "
+              >
+                {{ t("alerts.alertDetails.noHistoryAvailable") }}
+              </div>
+              <div
+                class="tw:text-xs"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'tw:text-gray-600'
+                    : 'tw:text-gray-400'
+                "
+              >
+                Try expanding the time range
+              </div>
+            </div>
+
+            <!-- History Table -->
+            <div
+              v-else
+              class="tw:flex tw:flex-col tw:flex-1 tw:overflow-hidden tw:gap-2"
+            >
+              <!-- Firing frequency timeline -->
+              <AlertHistoryTimeline
+                v-if="alertHistory.length > 0"
+                :history="alertHistory"
+              />
+
+              <div
+                class="code-block tw:flex tw:flex-col tw:flex-1 tw:overflow-hidden"
+                :class="store.state.theme === 'dark' ? 'code-block-dark' : 'code-block-light'"
+              >
+                <OTable
+                  :data="groupedHistory"
+                  :columns="historyTableColumns"
+                  row-key="timestamp"
+                  pagination="server"
+                  v-model:current-page="currentPage"
+                  v-model:page-size="selectedPerPage"
+                  :total-count="resultTotal"
+                  :loading="isLoadingHistory"
+                  :row-class="getRowClass"
+                  :default-columns="false"
+                  :show-global-filter="false"
+                  class="history-table tw:flex-1 tw:overflow-hidden"
+                  data-test="alert-details-history-table"
+                  @pagination-change="onPaginationChange"
+                >
+                  <template #[`cell-#`]="{ row }">
+                    <span
+                      class="tw:text-[13px] tw:tabular-nums"
+                      :class="store.state.theme === 'dark' ? 'tw:text-gray-500' : 'tw:text-gray-400'"
+                    >
+                      {{ row._displayIndex ?? '—' }}
+                    </span>
+                  </template>
+
+                  <template #cell-status="{ row }">
+                    <!-- Flapping group row -->
+                    <div v-if="row._flappingGroup" class="tw:flex tw:items-center tw:gap-1.5">
+                      <OIcon
+                        :name="expandedGroups.has(row.timestamp) ? 'expand-less' : 'expand-more'"
+                        size="sm"
+                        class="tw:cursor-pointer tw:opacity-50 tw:shrink-0"
+                        @click="toggleFlappingGroup(row.timestamp)"
+                      />
+                      <OBadge size="sm" variant="warning-soft" class="tw:cursor-pointer tw:shrink-0" @click="toggleFlappingGroup(row.timestamp)">
+                        ⚡ Flapping
+                      </OBadge>
+                      <span class="tw:text-[11px] tw:truncate" style="color: var(--color-text-secondary)">
+                        {{ row._children.length }} rows · {{ row._duration }}
+                      </span>
+                    </div>
+                    <!-- Normal row -->
+                    <OBadge
+                      v-else
+                      size="sm"
+                      :icon="getStatusChipIcon(row.status)"
+                      :variant="getStatusChipVariant(row.status)"
+                      class="tw:cursor-default"
+                      data-test="alert-history-status-chip"
+                    >
+                      {{ formatStatus(row.status) }}
+                      <OTooltip v-if="row.error" :max-width="'300px'" :content="row.error" />
+                    </OBadge>
+                  </template>
+
+                  <template #cell-timestamp="{ row }">
+                    <span class="tw:text-[13px] tw:tabular-nums tw:whitespace-nowrap" :class="row._child ? 'tw:pl-5 tw:opacity-70' : ''">
+                      {{ formatTimestampFull(row.timestamp) }}
+                    </span>
+                  </template>
+
+                  <template #cell-evaluation_time="{ row }">
+                    <span class="tw:text-[13px] tw:tabular-nums">
+                      {{ row.evaluation_took_in_secs ? row.evaluation_took_in_secs.toFixed(3) + "s" : "—" }}
+                    </span>
+                  </template>
+
+                  <template #cell-query_time="{ row }">
+                    <span class="tw:text-[13px] tw:tabular-nums">
+                      {{ row.query_took ? row.query_took + "ms" : "—" }}
+                    </span>
+                  </template>
+
+                  <template #cell-anomaly_count="{ row }">
+                    <span
+                      class="tw:text-[13px] tw:tabular-nums"
+                      :class="row.anomaly_count > 0 ? 'tw:text-red-500 tw:font-medium' : ''"
+                    >
+                      {{ row.anomaly_count != null ? row.anomaly_count : "—" }}
+                    </span>
+                  </template>
+
+                  <template #cell-error="{ row }">
+                    <span class="tw:text-[13px]">{{ row.error || "—" }}</span>
+                  </template>
+
+                  <template #bottom>
+                    <div class="tw:flex tw:items-center tw:w-full tw:h-[48px]">
+                      <div class="o2-table-footer-title tw:flex tw:items-center tw:w-[220px]">
+                        {{ resultTotal }} {{ t("alerts.alertDetails.results") }}
+                      </div>
+                    </div>
+                  </template>
+                </OTable>
+              </div>
+            </div>
+          </div>
+        </OTabPanel>
+
+        <!-- Condition Panel -->
+        <OTabPanel
+          name="condition"
+          layout="flex-col"
+          stretch
+        >
+          <div
+            class="tw:flex tw:flex-col tw:flex-1 tw:overflow-hidden tw:px-2 tw:py-2"
+          >
+            <!-- Anomaly detection condition view — mirrors the alert SQL code block -->
+            <template v-if="isAnomaly">
+              <div
+                class="code-block tw:flex tw:flex-col tw:flex-1 tw:overflow-hidden "
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'code-block-dark'
+                    : 'code-block-light'
+                "
+              >
+                <div
+                  class="code-block-header tw:shrink-0"
+                  :class="
+                    store.state.theme === 'dark'
+                      ? 'code-block-header-dark'
+                      : 'code-block-header-light'
+                  "
+                >
+                  <div class="tw:flex tw:items-center tw:gap-1.5">
+                    <span
+                      class="tw:text-[11px] tw:font-medium"
+                      :class="
+                        store.state.theme === 'dark'
+                          ? 'tw:text-gray-400'
+                          : 'tw:text-gray-500'
+                      "
+                    >
+                      SQL
+                    </span>
+                  </div>
+                  <OButton
+                    v-if="anomalySql"
+                    @click="copyToClipboard(anomalySql, { successMessage: 'SQL Copied Successfully!', timeout: 3000 })"
+                    variant="ghost-muted"
+                    size="icon-xs-sq"
+                    data-test="anomaly-details-copy-sql-btn"
+                  >
+                    <OIcon name="content-copy" size="sm" />
+                    <OTooltip :content="t('alerts.alertDetails.copy')" />
+                  </OButton>
+                </div>
+                <pre
+                  class="code-block-content tw:text-[13px] tw:m-0 tw:leading-relaxed tw:flex-1 tw:overflow-y-auto"
+                  >{{ anomalySql || t("alerts.alertDetails.noCondition") }}</pre
+                >
+              </div>
+            </template>
+
+            <!-- Regular alert condition view -->
+            <template v-else>
+              <div
+                class="code-block tw:flex tw:flex-col tw:flex-1 tw:overflow-hidden"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'code-block-dark'
+                    : 'code-block-light'
+                "
+              >
+                <!-- Code block header bar — stays fixed -->
+                <div
+                  class="code-block-header tw:shrink-0"
+                  :class="
+                    store.state.theme === 'dark'
+                      ? 'code-block-header-dark'
+                      : 'code-block-header-light'
+                  "
+                >
+                  <div class="tw:flex tw:items-center tw:gap-1.5">
+                    <span
+                      class="tw:text-[11px] tw:font-medium"
+                      :class="
+                        store.state.theme === 'dark'
+                          ? 'tw:text-gray-400'
+                          : 'tw:text-gray-500'
+                      "
+                    >
+                      {{
+                        alertDetails.type === "sql"
+                          ? "SQL"
+                          : alertDetails.type === "promql"
+                            ? "PromQL"
+                            : "Conditions"
+                      }}
+                    </span>
+                  </div>
+                  <OButton
+                    v-if="
+                      alertDetails.conditions &&
+                      alertDetails.conditions !== '' &&
+                      alertDetails.conditions !== '--'
+                    "
+                    @click="
+                      copyToClipboard(
+                        alertDetails.conditions,
+                        {
+                          successMessage: (alertDetails.type === 'sql'
+                            ? t('alerts.alertDetails.sqlQuery')
+                            : alertDetails.type === 'promql'
+                              ? t('alerts.alertDetails.promqlQuery')
+                              : t('alerts.alertDetails.conditions')) + ' Copied Successfully!',
+                        },
+                      )
+                    "
+                    variant="ghost-muted"
+                    size="icon-xs-sq"
+                    data-test="alert-details-copy-conditions-btn"
+                  >
+                    <OIcon name="content-copy" size="sm" />
+                    <OTooltip :content="t('alerts.alertDetails.copy')" />
+                  </OButton>
+                </div>
+                <!-- Code content — scrolls internally -->
+                <pre
+                  class="code-block-content tw:text-[13px] tw:m-0 tw:leading-relaxed tw:flex-1 tw:overflow-y-auto"
+                  >{{
+                    alertDetails.conditions !== "" &&
+                    alertDetails.conditions !== "--"
+                      ? alertDetails.type === "sql" ||
+                        alertDetails.type === "promql"
+                        ? alertDetails.conditions
+                        : alertDetails.conditions.length !== 2
+                          ? `if ${alertDetails.conditions}`
+                          : t("alerts.alertDetails.noCondition")
+                      : t("alerts.alertDetails.noCondition")
+                  }}</pre
+                >
+              </div>
+            </template>
+
+            <!-- Description (only show if exists) -->
+            <div v-if="alertDetails.description" class="tw:mt-3 tw:shrink-0">
+              <div
+                class="tw:flex tw:items-center tw:gap-1.5 tw:text-[12px] tw:font-semibold tw:uppercase tw:tracking-wider tw:mb-1"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'tw:text-gray-400'
+                    : 'tw:text-gray-500'
+                "
+              >
+                <OIcon name="info-outline" size="xs" />
+                {{ t("common.description") }}
+              </div>
+              <div
+                class="tw:text-[13px] tw:px-3 tw:py-2 tw:rounded tw:leading-relaxed"
+                :class="
+                  store.state.theme === 'dark'
+                    ? 'tw:bg-gray-800 tw:text-gray-300'
+                    : 'tw:bg-gray-50 tw:text-gray-700'
+                "
+              >
+                {{ alertDetails.description }}
+              </div>
+            </div>
+          </div>
+        </OTabPanel>
+      </OTabPanels>
+    </div>
+  </ODrawer>
+</template>
+
+<script setup lang="ts">
+import OTabPanels from "@/lib/navigation/Tabs/OTabPanels.vue";
+import OTabPanel from "@/lib/navigation/Tabs/OTabPanel.vue";
+import ODrawer from "@/lib/overlay/Drawer/ODrawer.vue";
+import { ref, watch, computed } from "vue";
+import { useStore } from "vuex";
+import { useI18n } from "vue-i18n";
+import { formatToTimeCompact, formatTimestamp } from "@/utils/date";
+import OButton from "@/lib/core/Button/OButton.vue";
+import OToggleGroup from "@/lib/core/ToggleGroup/OToggleGroup.vue";
+import OToggleGroupItem from "@/lib/core/ToggleGroup/OToggleGroupItem.vue";
+import OIcon from "@/lib/core/Icon/OIcon.vue";
+import OBadge from "@/lib/core/Badge/OBadge.vue";
+import DateTime from "@/components/DateTime.vue";
+import OTable from "@/lib/core/Table/OTable.vue";
+import { COL } from "@/lib/core/Table/OTable.types";
+import alertsService from "@/services/alerts";
+import anomalyDetectionService from "@/services/anomaly_detection";
+import { buildAnomalyPreviewSql } from "@/utils/alerts/anomalySqlBuilder";
+import type { Ref } from "vue";
+import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
+import { toast } from "@/lib/feedback/Toast/useToast";
+import { copyToClipboard } from "@/utils/clipboard";
+import AlertHistoryTimeline from "./AlertHistoryTimeline.vue";
+
+// Composables
+const { t } = useI18n();
+const store = useStore();
+
+// Props & Emits
+interface Props {
+  alertDetails: any;
+  alertId: string;
+  alertType?: string;
+  open?: boolean;
+}
+
+const props = defineProps<Props>();
+
+const isAnomaly = computed(() => props.alertType === "anomaly_detection");
+
+// Full config fetched from the dedicated anomaly detection endpoint.
+// The list API only returns summary fields; we need this for the Condition tab.
+const fullAnomalyConfig = ref<any>(null);
+
+const anomalySql = computed(() => {
+  const d = fullAnomalyConfig.value || props.alertDetails;
+  if (!d) return "";
+  return buildAnomalyPreviewSql(d);
+});
+
+const emit = defineEmits<{
+  "update:open": [value: boolean];
+}>();
+
+const resultTotal = ref(0);
+
+// Tabs
+const activeTab = ref("history");
+
+// Refs
+const alertHistory: Ref<any[]> = ref([]);
+const isLoadingHistory = ref(false);
+
+// ── Flapping group helpers ──────────────────────────────────────────────────
+const MIN_FLAP_TRANSITIONS = 3; // firing↔ok flips within a run to call it flapping
+const MIN_FLAP_WINDOW = 4;      // minimum consecutive rows needed
+
+function rowIsFiring(s: string) {
+  const v = s?.toLowerCase();
+  return v === "firing" || v === "error" || v === "anomaly" || v === "completed";
+}
+function rowIsOk(s: string) {
+  const v = s?.toLowerCase();
+  return v === "ok" || v === "success" || v === "normal" || v === "condition_not_satisfied";
+}
+
+// Build a boolean mask: true = row is inside a flapping run.
+// Strategy:
+//  1. Scan forward to find the first window of MIN_FLAP_WINDOW rows that
+//     contains >= MIN_FLAP_TRANSITIONS firing↔ok flips — this is a zone start.
+//  2. Once inside a zone, keep extending as long as each new row causes a
+//     flip relative to the previous non-skipped state.
+//  3. Stop extending when we see MAX_STABLE_TAIL consecutive rows with no
+//     flip, then trim those trailing stable rows off the end of the zone.
+function buildFlappingMask(rows: any[]): boolean[] {
+  const n = rows.length;
+  const mask = new Array(n).fill(false);
+  const MAX_STABLE_TAIL = 2; // consecutive non-flipping rows that end a zone
+
+  function stateOf(s: string): "firing" | "ok" | "other" {
+    if (rowIsFiring(s)) return "firing";
+    if (rowIsOk(s))    return "ok";
+    return "other";
+  }
+
+  let i = 0;
+  while (i < n) {
+    // Count transitions in the next MIN_FLAP_WINDOW rows
+    let transitions = 0;
+    let prev = stateOf(rows[i].status);
+    let windowEnd = -1;
+    for (let j = i + 1; j < Math.min(i + MIN_FLAP_WINDOW + 10, n); j++) {
+      const cur = stateOf(rows[j].status);
+      if (cur !== "other" && prev !== "other" && cur !== prev) transitions++;
+      if (cur !== "other") prev = cur;
+      if (transitions >= MIN_FLAP_TRANSITIONS) { windowEnd = j; break; }
+    }
+
+    if (windowEnd === -1) { i++; continue; } // no flapping here
+
+    // Found a flapping zone starting at i — now extend it forward
+    let zoneEnd = windowEnd;
+    let stableTail = 0;
+    let lastState = stateOf(rows[zoneEnd].status);
+
+    for (let j = zoneEnd + 1; j < n; j++) {
+      const cur = stateOf(rows[j].status);
+      if (cur === "other") { zoneEnd = j; stableTail = 0; continue; }
+      if (cur !== lastState) {
+        // flip — still flapping
+        lastState = cur;
+        zoneEnd = j;
+        stableTail = 0;
+      } else {
+        // same state — stable tail growing
+        stableTail++;
+        if (stableTail >= MAX_STABLE_TAIL) break;
+        zoneEnd = j;
+      }
+    }
+
+    // Trim stable tail off the end
+    while (zoneEnd > windowEnd && stateOf(rows[zoneEnd].status) === stateOf(rows[zoneEnd - 1].status)) {
+      zoneEnd--;
+    }
+
+    for (let k = i; k <= zoneEnd; k++) mask[k] = true;
+    i = zoneEnd + 1; // skip past this zone
+  }
+  return mask;
+}
+
+function durationLabel(startTs: number, endTs: number): string {
+  // timestamps are in microseconds — convert to ms
+  const startMs = startTs > 1e12 ? startTs / 1000 : startTs;
+  const endMs   = endTs   > 1e12 ? endTs   / 1000 : endTs;
+  const ms = Math.abs(endMs - startMs);
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "< 1 min";
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Tracks which flapping group rows are expanded (key = group timestamp)
+const expandedGroups = ref<Set<number>>(new Set());
+
+function toggleFlappingGroup(ts: number) {
+  const s = new Set(expandedGroups.value);
+  s.has(ts) ? s.delete(ts) : s.add(ts);
+  expandedGroups.value = s;
+}
+
+// Produce the display list: normal rows pass through, flapping runs become one
+// header row (+ children shown when expanded)
+const groupedHistory = computed(() => {
+  const rows = [...alertHistory.value].sort((a, b) => b.timestamp - a.timestamp); // newest first for table
+  if (!rows.length) return rows;
+
+  // mask is on sorted-asc; re-sort for mask then flip back
+  const asc = [...rows].sort((a, b) => a.timestamp - b.timestamp);
+  const mask = buildFlappingMask(asc);
+  // map back to desc order by timestamp
+  const maskByTs = new Map(asc.map((r, i) => [r.timestamp, mask[i]]));
+
+  const result: any[] = [];
+  let i = 0;
+  let displayNum = (currentPage.value - 1) * selectedPerPage.value + 1;
+  while (i < rows.length) {
+    const row = rows[i];
+    if (!maskByTs.get(row.timestamp)) {
+      result.push({ ...row, _displayIndex: displayNum++ });
+      i++;
+    } else {
+      // collect all consecutive flapping rows
+      const children: any[] = [];
+      while (i < rows.length && maskByTs.get(rows[i].timestamp)) {
+        children.push(rows[i]);
+        i++;
+      }
+      const timestamps = children.map((r) => r.timestamp);
+      const minTs = Math.min(...timestamps);
+      const maxTs = Math.max(...timestamps);
+      const groupTs = maxTs;
+      result.push({
+        timestamp: groupTs,
+        status: "flapping",
+        _flappingGroup: true,
+        _children: children,
+        _duration: durationLabel(minTs, maxTs),
+        _displayIndex: null,
+      });
+      displayNum += children.length;
+      if (expandedGroups.value.has(groupTs)) {
+        children.forEach((c, ci) =>
+          result.push({ ...c, _child: true, _displayIndex: displayNum - children.length + ci }),
+        );
+      }
+    }
+  }
+  return result;
+});
+
+// Date time - default to last 15 minutes (relative)
+const dateTimeRef = ref<any>(null);
+const dateTimeType = ref("relative");
+const relativeTime = ref("15m");
+const _now = Date.now();
+const _fifteenMinutesAgo = _now - 15 * 60 * 1000;
+const absoluteTime = ref({
+  startTime: _fifteenMinutesAgo * 1000, // microseconds
+  endTime: _now * 1000, // microseconds
+});
+const dateTimeValues = ref({
+  startTime: _fifteenMinutesAgo * 1000,
+  endTime: _now * 1000,
+  type: "relative",
+  relativeTimePeriod: "15m",
+});
+
+// Pagination (server-side)
+const selectedPerPage = ref<number>(50);
+const currentPage = ref<number>(1);
+
+const onPaginationChange = async (params: { page: number; size: number }) => {
+  currentPage.value = params.page;
+  selectedPerPage.value = params.size;
+  isLoadingHistory.value = true;
+  await fetchAlertHistory(props.alertId);
+  isLoadingHistory.value = false;
+};
+
+// Columns
+const alertHistoryColumns = [
+  {
+    id: "#",
+    header: "#",
+    accessorFn: () => null,
+    sortable: false,
+    size: 48,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "timestamp",
+    header: t("alerts.historyTable.timestamp"),
+    accessorKey: "timestamp",
+    sortable: true,
+    size: 140,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "status",
+    header: t("alerts.historyTable.status"),
+    accessorKey: "status",
+    sortable: true,
+    size: 280,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "evaluation_time",
+    header: t("alerts.historyTable.evaluationTime"),
+    accessorKey: "evaluation_took_in_secs",
+    sortable: true,
+    size: 140,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "query_time",
+    header: t("alerts.historyTable.queryTime"),
+    accessorKey: "query_took",
+    sortable: true,
+    size: 100,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "error",
+    header: t("alerts.historyTable.error"),
+    accessorKey: "true",
+    sortable: false,
+    size: COL.description,
+    meta: { align: "left" as const, autoWidth: true },
+  },
+];
+
+const anomalyHistoryColumns = [
+  {
+    id: "#",
+    header: "#",
+    accessorFn: () => null,
+    sortable: false,
+    size: 48,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "timestamp",
+    header: t("alerts.historyTable.timestamp"),
+    accessorKey: "timestamp",
+    sortable: false,
+    size: 140,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "status",
+    header: "Result",
+    accessorKey: "status",
+    sortable: false,
+    size: 120,
+    meta: { align: "left" as const },
+  },
+  {
+    id: "evaluation_time",
+    header: t("alerts.historyTable.evaluationTime"),
+    accessorKey: "evaluation_took_in_secs",
+    sortable: false,
+    size: 130,
+    meta: { align: "right" as const },
+  },
+  {
+    id: "anomaly_count",
+    header: "Anomalies",
+    accessorKey: "anomaly_count",
+    sortable: false,
+    size: 120,
+    meta: { align: "right" as const },
+  },
+];
+
+const historyTableColumns = computed(() =>
+  isAnomaly.value ? anomalyHistoryColumns : alertHistoryColumns,
+);
+
+// Helper Functions
+
+const getRowClass = (row: any) => {
+  if (row?._flappingGroup) {
+    return store.state.theme === "dark" ? "row-flapping-dark" : "row-flapping-light";
+  }
+  if (row?._child) {
+    return store.state.theme === "dark" ? "row-child-dark" : "row-child-light";
+  }
+  const status = row?.status?.toLowerCase();
+  const isFiringStatus = status === "firing" || status === "error" || status === "anomaly" || status === "completed";
+  if (isFiringStatus) {
+    return store.state.theme === "dark" ? "row-error-dark" : "row-error-light";
+  }
+  return "";
+};
+
+const formatStatus = (status: string) => {
+  if (!status) return "Unknown";
+  switch (status.toLowerCase()) {
+    case "firing":
+    case "completed":
+    case "error":
+    case "anomaly":
+      return "Firing";
+    case "ok":
+    case "success":
+    case "normal":
+    case "condition_not_satisfied":
+      return "Ok";
+    case "skipped":
+      return "Skipped";
+    case "failed":
+      return "Failed";
+    case "pending":
+      return "Pending";
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
+  }
+};
+
+const getStatusChipIcon = (status: string) => {
+  switch (status?.toLowerCase()) {
+    case "firing":
+    case "error":
+    case "anomaly":
+      return "error-outline";
+    case "completed":
+      return "notifications-active";
+    case "ok":
+    case "success":
+    case "normal":
+    case "condition_not_satisfied":
+      return "check-circle-outline";
+    case "skipped":
+      return "block";
+    case "failed":
+      return "cancel";
+    case "pending":
+      return "schedule";
+    default:
+      return "help-outline";
+  }
+};
+
+const getStatusChipVariant = (status: string) => {
+  switch (status?.toLowerCase()) {
+    case "firing":
+    case "error":
+    case "anomaly":
+    case "completed":
+      return "error-soft";
+    case "ok":
+    case "success":
+    case "normal":
+    case "condition_not_satisfied":
+      return "success-soft";
+    case "skipped":
+      return "warning-soft";
+    case "failed":
+      return "error-soft";
+    case "pending":
+      return "primary-soft";
+    default:
+      return "default-soft";
+  }
+};
+
+const formatTimestamp = (timestamp: number) => {
+  if (!timestamp) return "N/A";
+  const now = Date.now() * 1000; // microseconds
+  const diff = now - timestamp;
+
+  if (diff < 3600000000) {
+    const minutes = Math.floor(diff / 60000000);
+    return `${minutes} min ago`;
+  }
+  if (diff < 86400000000) {
+    const hours = Math.floor(diff / 3600000000);
+    return `${hours}h ago`;
+  }
+  if (diff < 604800000000) {
+    const days = Math.floor(diff / 86400000000);
+    return `${days}d ago`;
+  }
+  return formatToTimeCompact(timestamp);
+};
+
+const formatTimestampFull = (timestamp: number) => {
+  if (!timestamp) return "N/A";
+  return formatTimestamp(timestamp, "MMM DD, YYYY HH:mm:ss");
+};
+
+// Main Functions
+const fetchAlertHistory = async (alertId: string) => {
+  if (!alertId) return;
+
+  try {
+    const startTime = dateTimeValues.value.startTime;
+    const endTime = dateTimeValues.value.endTime;
+    const from = (currentPage.value - 1) * selectedPerPage.value;
+
+    const historyParams: Record<string, any> = {
+      size: selectedPerPage.value,
+      from: from,
+      start_time: startTime,
+      end_time: endTime,
+    };
+    if (isAnomaly.value) {
+      historyParams.anomaly_id = alertId;
+    } else {
+      historyParams.alert_id = alertId;
+    }
+    const response = await alertsService.getHistory(
+      store?.state?.selectedOrganization?.identifier,
+      historyParams,
+    );
+    alertHistory.value = response.data?.hits || [];
+    resultTotal.value = response.data?.total || 0;
+  } catch (error: any) {
+    alertHistory.value = [];
+    resultTotal.value = 0;
+    toast({
+      variant: "error",
+      message:
+        error.response?.data?.message ||
+        error.message ||
+        t("alerts.failedToFetchHistory"),
+      timeout: 5000,
+    });
+  }
+};
+
+const updateDateTime = (value: any) => {
+  dateTimeValues.value = {
+    startTime: value.startTime,
+    endTime: value.endTime,
+    type: value.relativeTimePeriod ? "relative" : "absolute",
+    relativeTimePeriod: value.relativeTimePeriod || "",
+  };
+
+  if (value.relativeTimePeriod) {
+    dateTimeType.value = "relative";
+    relativeTime.value = value.relativeTimePeriod;
+  } else {
+    dateTimeType.value = "absolute";
+    absoluteTime.value = {
+      startTime: value.startTime,
+      endTime: value.endTime,
+    };
+  }
+
+  currentPage.value = 1;
+  if (props.alertId) {
+    isLoadingHistory.value = true;
+    fetchAlertHistory(props.alertId).finally(() => {
+      isLoadingHistory.value = false;
+    });
+  }
+};
+
+// Watchers
+watch(
+  () => props.alertId,
+  async (newVal) => {
+    if (newVal) {
+      currentPage.value = 1;
+      isLoadingHistory.value = true;
+      await fetchAlertHistory(newVal);
+      isLoadingHistory.value = false;
+      // Fetch full config for the Condition tab when this is an anomaly detection alert.
+      if (isAnomaly.value) {
+        try {
+          const org = store?.state?.selectedOrganization?.identifier;
+          const res = await anomalyDetectionService.getConfig(org, newVal);
+          fullAnomalyConfig.value = res.data;
+        } catch {
+          fullAnomalyConfig.value = null;
+        }
+      } else {
+        fullAnomalyConfig.value = null;
+      }
+    }
+  },
+  { immediate: true },
+);
+</script>
+
+<style lang="scss" scoped>
+/* ── Code Block ── */
+.code-block {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid;
+}
+.code-block-light {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+.code-block-dark {
+  border-color: #374151;
+  // background: #111827;
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid;
+}
+.code-block-header-light {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+.code-block-header-dark {
+  // background: #1f2937;
+  border-color: #374151;
+}
+
+.code-block-content {
+  padding: 10px 14px;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+/* ── Row tints ── */
+.row-error-light   { background: #fff5f5 !important; }
+.row-error-dark    { background: #2d1b1b !important; }
+.row-flapping-light { background: #f5f3ff !important; }
+.row-flapping-dark  { background: #1e1a2e !important; }
+.row-child-light   { background: #fafafa !important; }
+.row-child-dark    { background: #1a1a1a !important; }
+
+/* ── Table layout ── */
+.history-table {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ── Tab panels fill height ── */
+:deep(.o-tab-panels) {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+:deep(.o-tab-panel) {
+  flex: 1;
+}
+</style>

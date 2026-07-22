@@ -1,0 +1,39 @@
+# Skyramp Workspace Configuration — OpenObserve testbot (HOST-NATIVE SUT).
+# Ported from sxarsky/openobserve PR #1 (Per's proven from-source config).
+# runtimeDetails.dockerNetwork: host is the key switch — the SUT runs NATIVELY on the
+# runner host (localhost:5080), so with the executor on host networking it reaches the
+# SUT directly (no container-network mismatch). Repo/version fields updated for this fork.
+workspace:
+  repoName: nkravec/openobserve
+  repoUrl: https://github.com/nkravec/openobserve
+metadata:
+  schemaVersion: v1
+  mcpVersion: 0.3.1           # pin UI Maintenance build (matches workflow skyrampMcpVersion)
+  executorVersion: v1.3.34    # v0.11.0 action default
+  createdAt: "2026-01-01T00:00:00Z"
+  updatedAt: "2026-01-01T00:00:00Z"
+services:
+  - serviceName: openobserve-backend
+    language: python
+    framework: pytest
+    testDirectory: tests
+    api:
+      schemaPath: http://localhost:5080/api-doc/openapi.json
+      authType: basic
+      authHeader: Authorization
+      authScheme: Basic
+      baseUrl: http://localhost:5080
+    runtimeDetails:
+      runtime: docker
+      dockerNetwork: host        # host-native SUT
+  - serviceName: openobserve-web
+    language: typescript
+    framework: playwright
+    testDirectory: tests/ui-testing/playwright-tests
+    api:
+      baseUrl: http://localhost:5080/web
+      authType: none
+      authHeader: ""
+    runtimeDetails:
+      runtime: docker
+      dockerNetwork: host        # host-native SUT
