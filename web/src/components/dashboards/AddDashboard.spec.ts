@@ -292,6 +292,43 @@ describe("AddDashboard", () => {
     });
   });
 
+  describe("Duplicate Name Validation", () => {
+    beforeEach(() => {
+      store.state.organizationData.allDashboardList = {
+        default: [{ title: "Existing Dashboard" }],
+      };
+    });
+
+    it("rejects a case-insensitive duplicate name and does not call dashboardService.create", async () => {
+      wrapper = createWrapper();
+
+      // Drive the real form: name matches an existing dashboard in the
+      // folder (case-insensitive) → schema invalid → @submit never fires.
+      (wrapper.vm.addDashboardForm as any).form.setFieldValue(
+        "name",
+        "existing dashboard",
+      );
+      await (wrapper.vm.addDashboardForm as any).form.handleSubmit();
+      await flushPromises();
+
+      expect(dashboardService.create).not.toHaveBeenCalled();
+      expect(wrapper.emitted("updated")).toBeFalsy();
+    });
+
+    it("still submits successfully when the name does not match any existing dashboard in the folder", async () => {
+      wrapper = createWrapper();
+
+      (wrapper.vm.addDashboardForm as any).form.setFieldValue(
+        "name",
+        "Brand New Dashboard",
+      );
+      await (wrapper.vm.addDashboardForm as any).form.handleSubmit();
+      await flushPromises();
+
+      expect(dashboardService.create).toHaveBeenCalled();
+    });
+  });
+
   describe("Error Handling", () => {
     it("should show an error notification when dashboard creation rejects with a message", async () => {
       vi.mocked(dashboardService.create).mockRejectedValueOnce(
