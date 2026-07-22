@@ -72,7 +72,7 @@ jobs:
       - name: Install protoc
         run: bash ./.github/protoc.sh
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
