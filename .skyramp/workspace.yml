@@ -16,7 +16,12 @@ services:
   - serviceName: openobserve-backend
     language: python
     framework: pytest
-    testDirectory: tests
+    # Point at the actual pytest dir (tests/ also contains ui-testing). Root-level
+    # "tests" made testbot pre-flight treat the backend as owning EVERY changed file
+    # (incl. frontend-only web/** PRs) and probe SPA routes like /dashboards/view
+    # against the basic-auth API → false AUTH_FAILURE. Scoping to tests/api-testing
+    # lets a frontend-only change be owned by no service, so pre-flight skips it.
+    testDirectory: tests/api-testing
     api:
       schemaPath: http://localhost:5080/api-doc/openapi.json
       authType: basic
