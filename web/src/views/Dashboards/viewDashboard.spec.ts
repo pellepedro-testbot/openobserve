@@ -1388,6 +1388,31 @@ describe("ViewDashboard", () => {
       );
     });
 
+    it("should compute totalPanelCount across tabs", async () => {
+      wrapper = createWrapper();
+      await flushPromises();
+
+      wrapper.vm.currentDashboardData.data = {
+        title: "Test Dashboard Title",
+        tabs: [{ panels: [{}, {}] }, { panels: [{}] }],
+      };
+
+      await wrapper.vm.$nextTick();
+
+      // Sum of panels.length across all tabs, not just the active tab
+      expect(wrapper.vm.totalPanelCount).toBe(3);
+
+      wrapper.vm.currentDashboardData.data = {
+        title: "Test Dashboard Title",
+        tabs: [{ panels: [] }],
+      };
+
+      await wrapper.vm.$nextTick();
+
+      // Freshly created dashboard with no panels should report 0
+      expect(wrapper.vm.totalPanelCount).toBe(0);
+    });
+
     it("should show correct folder name", async () => {
       // Update global mock store state
       Object.assign(global.mockStoreState, {
