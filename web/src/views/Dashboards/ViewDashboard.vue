@@ -53,6 +53,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           >
           <template #title>
             <span data-test="dashboard-name-title">{{ currentDashboardData.data?.title }}</span>
+            <span
+              data-test="dashboard-panel-count"
+              class="tw:ml-2 tw:text-xs tw:text-text-secondary"
+              >{{ totalPanelCount }} {{ totalPanelCount === 1 ? "panel" : "panels" }}</span
+            >
           </template>
           <template #actions>
             <OButton
@@ -414,6 +419,16 @@ export default defineComponent({
         store.state.organizationData.folders.find(
           (item: any) => item.folderId === (route.query.folder ?? "default"),
         )?.name ?? "default"
+      );
+    });
+
+    // Total number of panels across all tabs of the current dashboard, surfaced as a
+    // "N panels" count in the view header (0 for a freshly created, empty dashboard).
+    const totalPanelCount = computed(() => {
+      const tabs = currentDashboardData.data?.tabs ?? [];
+      return tabs.reduce(
+        (sum: number, tab: any) => sum + (tab.panels?.length ?? 0),
+        0,
       );
     });
 
@@ -1901,6 +1916,7 @@ export default defineComponent({
       savePanelLayout,
       renderDashboardChartsRef,
       folderNameFromFolderId,
+      totalPanelCount,
       breadcrumbItems,
       showJsonEditorDialog,
       openJsonEditor,
