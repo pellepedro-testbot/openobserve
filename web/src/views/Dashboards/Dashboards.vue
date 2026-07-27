@@ -222,33 +222,46 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               <span
                 class="row-actions tw:flex tw:items-center tw:justify-center tw:gap-0.5"
               >
-                <OButton
+                <ODropdown
                   v-if="row.actions == 'true'"
-                  icon-left="drive-file-move"
-                  :title="t('dashboard.move_to_another_folder')"
-                  variant="ghost"
-                  size="icon-xs-sq"
-                  data-test="dashboard-move-to-another-folder"
-                  @click.stop="showMoveDashboardPanel(row)"
-                />
-                <OButton
-                  v-if="row.actions == 'true'"
-                  icon-left="content-copy"
-                  :title="t('dashboard.duplicate')"
-                  variant="ghost"
-                  size="icon-xs-sq"
-                  data-test="dashboard-duplicate"
-                  @click.stop="duplicateDashboard(row.id, row.folder_id)"
-                />
-                <OButton
-                  v-if="row.actions == 'true'"
-                  icon-left="delete"
-                  :title="t('dashboard.delete')"
-                  variant="ghost-destructive"
-                  size="icon-xs-sq"
-                  data-test="dashboard-delete"
-                  @click.stop="showDeleteDialogFn({ row })"
-                />
+                  side="bottom"
+                  align="end"
+                >
+                  <template #trigger>
+                    <OButton
+                      icon-left="more-vert"
+                      :title="t('dashboard.actions')"
+                      variant="ghost"
+                      size="icon-xs-sq"
+                      data-test="dashboard-actions-menu"
+                      @click.stop
+                    />
+                  </template>
+                  <ODropdownItem
+                    data-test="dashboard-move-to-another-folder"
+                    @select="showMoveDashboardPanel(row)"
+                  >
+                    {{ t('dashboard.move_to_another_folder') }}
+                  </ODropdownItem>
+                  <ODropdownItem
+                    data-test="dashboard-duplicate"
+                    @select="duplicateDashboard(row.id, row.folder_id)"
+                  >
+                    {{ t('dashboard.duplicate') }}
+                  </ODropdownItem>
+                  <ODropdownItem
+                    data-test="dashboard-copy-link"
+                    @select="copyDashboardLink(row)"
+                  >
+                    {{ t('dashboard.copyLink') }}
+                  </ODropdownItem>
+                  <ODropdownItem
+                    data-test="dashboard-delete"
+                    @select="showDeleteDialogFn({ row })"
+                  >
+                    {{ t('dashboard.delete') }}
+                  </ODropdownItem>
+                </ODropdown>
               </span>
             </template>
             <template #empty>
@@ -893,6 +906,25 @@ export default defineComponent({
         },
       });
     };
+    const copyDashboardLink = async (row) => {
+      const resolved = router.resolve({
+        path: "/dashboards/view",
+        query: {
+          org_identifier: store.state.selectedOrganization.identifier,
+          dashboard: row.id,
+          folder: searchAcrossFolders.value
+            ? row.folder_id
+            : activeFolderId.value || "default",
+        },
+      });
+      const url = window.location.origin + resolved.href;
+      try {
+        await navigator.clipboard.writeText(url);
+        showPositiveNotification("Dashboard link copied to clipboard.");
+      } catch (err) {
+        showErrorNotification(err?.message ?? "Failed to copy dashboard link");
+      }
+    };
     const dashboardList = ref([]);
     // Start in the loading state so the table shows the skeleton on first
     // render instead of briefly flashing the empty state before the fetch.
@@ -1288,6 +1320,7 @@ export default defineComponent({
       importDashboard,
       resultTotal,
       routeToViewD,
+      copyDashboardLink,
       showDeleteDialogFn,
       confirmDeleteDialog,
       filterQuery,

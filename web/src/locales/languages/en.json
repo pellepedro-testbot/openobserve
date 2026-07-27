@@ -1916,6 +1916,8 @@
     "deleteDashboardsConfirmMsg": "Are you sure you want to delete {count} dashboard(s)?",
     "edit": "Edit Dashboard",
     "duplicate": "Duplicate Dashboard",
+    "copyLink": "Copy link",
+    "actions": "Actions",
     "move_to_another_folder": "Move to another Folder",
     "search": "Search Dashboard",
     "name": "Name",
