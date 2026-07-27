@@ -1932,6 +1932,7 @@
     "created": "Created",
     "actions": "Actions",
     "nameRequired": "Name is required",
+    "nameDuplicate": "A dashboard with this name already exists in this folder",
     "id": "Id",
     "goBackToDashboard": "Go back to dashboard",
     "import": "Import",

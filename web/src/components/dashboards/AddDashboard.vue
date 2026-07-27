@@ -43,7 +43,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script lang="ts">
-import { defineComponent, ref } from "vue";
+import { computed, defineComponent, ref } from "vue";
 import dashboardService from "../../services/dashboards";
 import { useI18n } from "vue-i18n";
 import { useStore } from "vuex";
@@ -82,7 +82,6 @@ export default defineComponent({
     const disableColor: any = ref("");
     const isValidIdentifier: any = ref(true);
     const { t } = useI18n();
-    const addDashboardSchema = makeAddDashboardSchema(t);
     const { showPositiveNotification, showErrorNotification } =
       useNotifications();
 
@@ -93,6 +92,18 @@ export default defineComponent({
       label: activeFolder?.name,
       value: activeFolder?.folderId,
     });
+
+    // Dashboard titles already in the target folder — the dashboard ID is
+    // server-generated, so nothing else stops two dashboards sharing a name
+    // in the same folder without this client-side check.
+    const existingDashboardNames = computed(() => {
+      const folderId = selectedFolder.value.value ?? props.activeFolderId;
+      const list = store.state.organizationData.allDashboardList?.[folderId] ?? [];
+      return list.map((dashboard: any) => dashboard.title).filter(Boolean);
+    });
+    const addDashboardSchema = computed(() =>
+      makeAddDashboardSchema(t, existingDashboardNames.value),
+    );
 
     //generate random integer number for dashboard Id
     function getRandInteger() {
