@@ -87,7 +87,7 @@ jobs:
         run: cargo build --profile release-ci --target x86_64-unknown-linux-gnu
 
       # ---- Run TestBot against the host-native SUT ----
-      - uses: skyramp/testbot@70034f7ff936e4e516064307679160cdc8da60eb # v0.11.0
+      - uses: skyramp/testbot@4722126f99847b5ef600de0a4b26e3349fa0eafe # v0.11.12
         with:
           skyrampLicenseFile: ${{ secrets.SKYRAMP_LICENSE_FILE }}
           anthropicApiKey: ${{ secrets.ANTHROPIC_API_KEY }}
